@@ -16,6 +16,11 @@ from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 
 from arch_unet import UNet
+from vgg16 import Vgg16
+from vgg16 import featureLoss
+from vgg16 import featureMSE
+from vgg16 import featureGRAM
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--noisetype", type=str, default="gauss25")
@@ -29,12 +34,13 @@ parser.add_argument('--n_feature', type=int, default=48)
 parser.add_argument('--n_channel', type=int, default=3)
 parser.add_argument('--lr', type=float, default=3e-4)
 parser.add_argument('--gamma', type=float, default=0.5)
-parser.add_argument('--n_epoch', type=int, default=100)
-parser.add_argument('--n_snapshot', type=int, default=1)
-parser.add_argument('--batchsize', type=int, default=4)
+parser.add_argument('--n_epoch', type=int, default=120)
+parser.add_argument('--n_snapshot', type=int, default=10)
+parser.add_argument('--batchsize', type=int, default=12)
 parser.add_argument('--patchsize', type=int, default=256)
 parser.add_argument("--Lambda1", type=float, default=1.0)
 parser.add_argument("--Lambda2", type=float, default=1.0)
+parser.add_argument("--Lambda3", type=float, default=0.1 )
 parser.add_argument("--increase_ratio", type=float, default=2.0)
 
 opt, _ = parser.parse_known_args()
@@ -59,7 +65,7 @@ def get_generator():
     g_cuda_generator.manual_seed(operation_seed_counter)
     return g_cuda_generator
 
-
+# add noise in dataset
 class AugmentNoise(object):
     def __init__(self, style):
         print(style)
@@ -202,18 +208,35 @@ class DataLoader_Imagenet_val(Dataset):
         # fetch image
         fn = self.train_fns[index]
         im = Image.open(fn)
+
+        h=im.size[0]
+        w=im.size[1]
+
+        if h<self.patch or w<self.patch:
+            im=im.resize((self.patch,self.patch),Image.ANTIALIAS)
+
         im = np.array(im, dtype=np.float32)
         # random crop
         H = im.shape[0]
         W = im.shape[1]
+
+
+
+
         if H - self.patch > 0:
             xx = np.random.randint(0, H - self.patch)
             im = im[xx:xx + self.patch, :, :]
         if W - self.patch > 0:
             yy = np.random.randint(0, W - self.patch)
             im = im[:, yy:yy + self.patch, :]
+
+
+
         # np.ndarray to torch.tensor
-        transformer = transforms.Compose([transforms.ToTensor()])
+        transformer = transforms.Compose([
+            #transforms.Resize((self.patch,self.patch)),
+            transforms.ToTensor()
+        ])
         im = transformer(im)
         return im
 
@@ -334,9 +357,14 @@ noise_adder = AugmentNoise(style=opt.noisetype)
 network = UNet(in_nc=opt.n_channel,
                out_nc=opt.n_channel,
                n_feature=opt.n_feature)
+featureNet=Vgg16()
+
 if opt.parallel:
     network = torch.nn.DataParallel(network)
+    featureNet=torch.nn.DataParallel(featureNet)
+
 network = network.cuda()
+featureNet=featureNet.cuda()
 
 # about training scheme
 num_epoch = opt.n_epoch
@@ -387,14 +415,23 @@ for epoch in range(1, opt.n_epoch + 1):
 
         loss1 = torch.mean(diff**2)
         loss2 = Lambda * torch.mean((diff - exp_diff)**2)
-        loss_all = opt.Lambda1 * loss1 + opt.Lambda2 * loss2
+
+        with torch.no_grad():
+            outImage=featureNet(noisy_output)
+            inImage=featureNet(noisy,True)
+            l1Loss=torch.mean(featureMSE(outImage,inImage))
+            l2Loss=torch.mean(featureGRAM(outImage,inImage))
+            loss3=l1Loss+l2Loss
+
+
+        loss_all = opt.Lambda1 * loss1 + opt.Lambda2 * loss2 +opt.Lambda3*loss3
 
         loss_all.backward()
         optimizer.step()
         print(
-            '{:04d} {:05d} Loss1={:.6f}, Lambda={}, Loss2={:.6f}, Loss_Full={:.6f}, Time={:.4f}'
+            '{:04d} {:05d} Loss1={:.4f}, Lambda={}, Loss2={:.4f}, LossMSE={:.4f}, LossGram={:.4f},Loss_Full={:.4f}, Time={:.4f}'
             .format(epoch, iteration, np.mean(loss1.item()), Lambda,
-                    np.mean(loss2.item()), np.mean(loss_all.item()),
+                    np.mean(loss2.item()), np.mean(l1Loss.item()),np.mean(l2Loss.item()),np.mean(loss_all.item()),
                     time.time() - st))
 
     scheduler.step()
