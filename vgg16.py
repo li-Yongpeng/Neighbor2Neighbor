@@ -89,7 +89,46 @@ def featureLoss(outImage,inImage):
     return l1+l2
 
 
+class FeatureLoss:
+    def __init__(self,argList1,argList2):
+        self.featurePara=argList1
+        self.gramPara=argList2
 
+    def featureMSE(self,a, b):
+        result = torch.zeros(a[0].shape[0], dtype=a[0].dtype)
+        para = self.featurePara
+        para = torch.as_tensor(para, dtype=a[0].dtype)
+        for i in range(len(a)):
+            temp = a[i] - b[i]
+            temp = temp.view(temp.size()[0], -1)
+            pixNum = temp[0].numel()
+            temp = temp.pow(2)
+            temp = torch.sum(temp, dim=1)
+            temp = temp / pixNum
+            temp = temp.cpu()
+
+            result += para[i] * temp
+        result = torch.abs(result)
+        return result
+
+    def featureGRAM(self,A, B):
+        (b, c, h, w) = A[0].size()
+        result = torch.zeros(b, dtype=A[0].dtype)
+
+        para = self.gramPara
+
+        for i in range(len(A)):
+            featuresA = gramMatrix(A[0])
+            featuresB = gramMatrix(B[0])
+            temp = featuresA - featuresB
+
+            temp = temp.view(b, -1)
+            temp = torch.sum(temp, dim=1)
+            temp = temp.cpu()
+
+            result += para[i] * temp
+        result = torch.abs(result)
+        return result
 
 
 

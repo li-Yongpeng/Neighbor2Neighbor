@@ -1,0 +1,8 @@
+/results/
+/resultsSP/
+Imagenet_val
+SpeckleData
+/test_val/
+/speckleFiles/
+.idea/
+__pycache__/

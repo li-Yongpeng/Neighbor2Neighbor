@@ -17,7 +17,7 @@ from torch.utils.data import Dataset
 
 from arch_unet import UNet
 from vgg16 import Vgg16
-from vgg16 import featureLoss
+from vgg16 import FeatureLoss
 from vgg16 import featureMSE
 from vgg16 import featureGRAM
 
@@ -42,6 +42,9 @@ parser.add_argument("--Lambda1", type=float, default=1.0)
 parser.add_argument("--Lambda2", type=float, default=1.0)
 parser.add_argument("--Lambda3", type=float, default=0.1 )
 parser.add_argument("--increase_ratio", type=float, default=2.0)
+parser.add_argument("--slist1",nargs='+',type=int,default=[1,1,1,1])
+parser.add_argument("--slist2",nargs='+',type=int,default=[1,1,1,1])
+
 
 opt, _ = parser.parse_known_args()
 systime = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M')
@@ -65,6 +68,23 @@ def get_generator():
     g_cuda_generator.manual_seed(operation_seed_counter)
     return g_cuda_generator
 
+
+def median(img,k_size=3):
+    h,w,c=img.shape
+
+    pad=k_size//2
+    out=np.zeros((h+2*pad,w+2*pad,c),dtype=float)
+    out[pad:pad+h,pad:pad+w]=img.copy().astype(float)
+
+    tmp=out.copy()
+    for y in range(h):
+        for x in range(w):
+            for ci in range(c):
+                out[pad+y,pad+x,ci]=np.mean(tmp[y:y+k_size,x:x+k_size,ci])
+
+    out=out[pad:pad+h,pad:pad+w]
+    return out
+
 # add noise in dataset
 class AugmentNoise(object):
     def __init__(self, style):
@@ -85,6 +105,11 @@ class AugmentNoise(object):
                 self.style = "poisson_fix"
             elif len(self.params) == 2:
                 self.style = "poisson_range"
+        elif style.startswith('speckle'):
+            self.params = [
+                float(p) for p in style.replace('speckle', '').split('_')
+            ]
+            self.style="speckle"
 
     def add_train_noise(self, x):
         shape = x.shape
@@ -115,6 +140,26 @@ class AugmentNoise(object):
                              device=x.device) * (max_lam - min_lam) + min_lam
             noised = torch.poisson(lam * x, generator=get_generator()) / lam
             return noised
+        elif self.style=="speckle":
+            var = self.params[0]
+            batch = x.shape[0]
+            c = x.shape[1]
+            h = x.shape[2]
+            w = x.shape[3]
+
+            z = np.random.multivariate_normal(np.zeros(2), 0.5 * var * np.eye(2), size=(h, w, c)).view(np.complex128)
+            noise = z
+            noise_abs = abs(noise)
+            noise_abs = np.squeeze(noise_abs)
+            noise_abs = median(noise_abs)
+
+            noise_abs = np.transpose(noise_abs, [2, 0, 1])
+            noise_batch = np.expand_dims(noise_abs, 0).repeat(batch, axis=0)
+            torchNoise=torch.from_numpy(noise_batch)
+            noiseGpu=torchNoise.cuda()
+            noised=torch.mul(x,noiseGpu)
+
+            return noised
 
     def add_valid_noise(self, x):
         shape = x.shape
@@ -134,6 +179,22 @@ class AugmentNoise(object):
             min_lam, max_lam = self.params
             lam = np.random.uniform(low=min_lam, high=max_lam, size=(1, 1, 1))
             return np.array(np.random.poisson(lam * x) / lam, dtype=np.float32)
+        elif self.style == "speckle":
+            w,h,c=x.shape
+            var=self.params[0]
+
+            z = np.random.multivariate_normal(np.zeros(2), 0.5 * var * np.eye(2), size=(h, w, c)).view(np.complex128)
+            # torch.repeat
+            # torch.repeat
+            noise = z
+            noise_abs = abs(noise)
+            noise_abs = np.squeeze(noise_abs)
+            noise_abs = median(noise_abs)
+
+            noiseimage = np.multiply(x, noise_abs)
+            noise_img = np.clip(noiseimage, 0, 255).astype(np.uint8)
+
+
 
 
 def space_to_depth(x, block_size):
@@ -366,6 +427,8 @@ if opt.parallel:
 network = network.cuda()
 featureNet=featureNet.cuda()
 
+fLoss=FeatureLoss(opt.slist1, opt.slist2)
+
 # about training scheme
 num_epoch = opt.n_epoch
 ratio = num_epoch / 100
@@ -419,8 +482,8 @@ for epoch in range(1, opt.n_epoch + 1):
         with torch.no_grad():
             outImage=featureNet(noisy_output)
             inImage=featureNet(noisy,True)
-            l1Loss=torch.mean(featureMSE(outImage,inImage))
-            l2Loss=torch.mean(featureGRAM(outImage,inImage))
+            l1Loss=torch.mean(fLoss.featureMSE(outImage,inImage))
+            l2Loss=torch.mean(fLoss.featureGRAM(outImage,inImage))
             loss3=l1Loss+l2Loss
 
 
