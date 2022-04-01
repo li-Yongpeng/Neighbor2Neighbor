@@ -188,6 +188,7 @@ class valDataset(Dataset):
         self.source_dir = noiseSource
         self.target_dir=noiseTarget
         self.name=name
+        self.patch=256
 
         self.train_fns = glob.glob(os.path.join(self.source_dir, "*"))
         self.train_fns.sort()
@@ -209,27 +210,7 @@ class valDataset(Dataset):
         if (im.size != tm.size):
             raise Exception("The size of train and target images are not equal!")
 
-
-
-
-
-
-        im = np.array(im, dtype=np.float32)
-        tm = np.array(tm, dtype=np.float32)
-
-        H = im.shape[0]
-        W = im.shape[1]
-        val_size = (max(H, W) + 31) // 32 * 32
-
-        im = np.pad(
-            im,
-            [[0, val_size - H], [0, val_size - W], [0, 0]],
-            'reflect')
-        tm = np.pad(
-            tm,
-            [[0, val_size - H], [0, val_size - W], [0, 0]],
-            'reflect')
-
+        im,tm=self.getImage(im,tm)
 
         # np.ndarray to torch.tensor
         transformer = transforms.Compose([
@@ -243,6 +224,31 @@ class valDataset(Dataset):
     def __len__(self):
         return len(self.train_fns)
 
+    def getImage(self, im, tm):
+
+        h = im.size[0]
+        w = im.size[1]
+
+        if h < self.patch or w < self.patch:
+            im = im.resize((self.patch, self.patch), Image.ANTIALIAS)
+            tm = tm.resize((self.patch, self.patch), Image.ANTIALIAS)
+
+        im = np.array(im, dtype=np.float32)
+        tm = np.array(tm, dtype=np.float32)
+        # random crop
+        H = im.shape[0]
+        W = im.shape[1]
+
+        if H - self.patch > 0:
+            xx = np.random.randint(0, H - self.patch)
+            im = im[xx:xx + self.patch, :, :]
+            tm = tm[xx:xx + self.patch, :, :]
+        if W - self.patch > 0:
+            yy = np.random.randint(0, W - self.patch)
+            im = im[:, yy:yy + self.patch, :]
+            tm = tm[:, yy:yy + self.patch, :]
+
+        return im, tm
 
 
 def logTrans(im):

@@ -42,9 +42,9 @@ parser.add_argument('--n_snapshot', type=int, default=10)
 parser.add_argument('--batchsize', type=int, default=12)
 parser.add_argument('--patchsize', type=int, default=256)
 parser.add_argument("--Lambda1", type=float, default=1.0)
-parser.add_argument("--Lambda2", type=float, default=1.0)
+parser.add_argument("--Lambda2", type=float, default=2.0)
 parser.add_argument("--Lambda3", type=float, default=0.1 )
-parser.add_argument("--increase_ratio", type=float, default=2.0)
+parser.add_argument("--increase_ratio", type=float, default=3.0)
 parser.add_argument("--slist1",nargs='+',type=int,default=[1,1,1,1])
 parser.add_argument("--slist2",nargs='+',type=int,default=[1,1,1,1])
 
@@ -195,14 +195,21 @@ TrainingLoader = DataLoader(dataset=TrainingDataset,
 
 # Validation Set
 # Kodak_dir = os.path.join(opt.val_dirs, "Kodak")
+
 Kodak_dir="/home/lyp/Disk/N2N/Kodak/1"
-BSD300_dir = os.path.join(opt.val_dirs, "BSD300")
-Set14_dir = os.path.join(opt.val_dirs, "Set14")
+Kodak_dir1="/home/lyp/PycharmProjects/Neighbor2Neighbor/validation/Kodak"
+
+
+BSD300_dir = "/home/lyp/Disk/N2N/BSD/1"
+BSD300_dir1 ="/home/lyp/PycharmProjects/Neighbor2Neighbor/validation/BSD300/test"
+
+Set14_dir = "/home/lyp/Disk/N2N/Set14/1"
+Set14_dir1= "/home/lyp/PycharmProjects/Neighbor2Neighbor/validation/Set14"
 
 # Kodak_dir1 = os.path.join(opt.val_target_dirs, "Kodak")
-Kodak_dir1="/home/lyp/PycharmProjects/Neighbor2Neighbor/validation/Kodak"
-BSD300_dir1 = os.path.join(opt.val_target_dirs, "BSD300")
-Set14_dir1= os.path.join(opt.val_target_dirs, "Set14")
+
+
+
 
 KodakDataset=valDataset(Kodak_dir,Kodak_dir1,"Kodak")
 BSD300Dataset=valDataset(BSD300_dir,BSD300_dir1,"BSD300")
@@ -228,8 +235,8 @@ Set14Loader=DataLoader(dataset=Set14Dataset,
                             drop_last=True)
 dataLoaderList=[]
 dataLoaderList.append(KodakLoader)
-# dataLoaderList.append(BSD300Loader)
-# dataLoaderList.append(Set14Loader)
+dataLoaderList.append(BSD300Loader)
+dataLoaderList.append(Set14Loader)
 
 
 
@@ -306,18 +313,18 @@ for epoch in range(1, opt.n_epoch + 1):
         loss1 = torch.mean(diff**2)
         loss2 = Lambda * torch.mean((diff - exp_diff)**2)
 
-        loss_all = opt.Lambda1 * loss1 + opt.Lambda2 * loss2
+        #loss_all = opt.Lambda1 * loss1 + opt.Lambda2 * loss2
 
 
-        # with torch.no_grad():
-        #     outImage=featureNet(noisy_output)
-        #     inImage=featureNet(noisy,True)
-        #     l1Loss=torch.mean(fLoss.featureMSE(outImage,inImage))
-        #     l2Loss=torch.mean(fLoss.featureGRAM(outImage,inImage))
-        #     loss3=l1Loss+l2Loss
-        #
-        #
-        # loss_all = opt.Lambda1 * loss1 + opt.Lambda2 * loss2 +opt.Lambda3*loss3
+        with torch.no_grad():
+            outImage=featureNet(noisy_output)
+            inImage=featureNet(noisy,True)
+            l1Loss=torch.mean(fLoss.featureMSE(outImage,inImage))
+            l2Loss=torch.mean(fLoss.featureGRAM(outImage,inImage))
+            loss3=l1Loss+l2Loss
+
+
+        loss_all = opt.Lambda1 * loss1 + opt.Lambda2 * loss2 +opt.Lambda3*loss3
 
         loss_all.backward()
         optimizer.step()
@@ -380,11 +387,11 @@ for epoch in range(1, opt.n_epoch + 1):
                     cur_ssim = calculate_ssim(clean[itr].astype(np.float32),
                                               pred255[itr].astype(np.float32))
                     ssim_result.append(cur_ssim)
-                    if epoch == opt.n_snapshot:
+                    if epoch == opt.n_epoch:
                         save_path = os.path.join(
                             validation_path,
-                            "{:03d}-{:04d}-{:03d}_denoised.png".format(
-                                iteration,itr, epoch))
+                            "{}-{:03d}-{:04d}-{:03d}_denoised.png".format(
+                                dataListName[i],iteration,itr, epoch))
                         Image.fromarray(pred255[itr]).convert('RGB').save(save_path)
 
             psnr_result = np.array(psnr_result)
